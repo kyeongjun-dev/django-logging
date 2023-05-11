@@ -1,0 +1,107 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: django
+spec:
+  selector:
+    app: django
+  type: ClusterIP
+  ports:
+  - port: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: django-v1
+spec:
+  selector:
+    matchLabels:
+      app: django
+      version: v1
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: django
+        version: v1
+    spec:
+      containers:
+      - name: django
+        image: rudwns273/django:logging
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+        env:
+        - name: VERSION
+          value: "v1"
+        volumeMounts:
+        - name: varlog
+          mountPath: /var/log
+
+      # sidecar fluent bit
+      - name: fluent-bit
+        image: fluent/fluent-bit
+        volumeMounts:
+        - name: varlog
+          mountPath: /var/log
+        - name: fluent-bit-config
+          mountPath: /fluent-bit/etc/
+      volumes:
+      - name: varlog
+        emptyDir: {}
+      - name: fluent-bit-config
+        configMap:
+          name: fluent-bit-configmap
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluent-bit-configmap
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+      Flush               1
+      Daemon              off
+    [INPUT]
+      name                tail
+      Alias               input_tail_debug_log
+      Tag                 debug_log
+      Path                /var/log/debug.log
+    [INPUT]
+      name                tail
+      Alias               input_tail_error_log
+      Tag                 error_log
+      Path                /var/log/error.log
+    [INPUT]
+      name                tail
+      Alias               input_tail_info_log
+      Tag                 info_log
+      Path                /var/log/info.log
+    [OUTPUT]
+      Name                stdout
+      Alias               log_stdout
+      Match               *
+    [OUTPUT]
+      name                es
+      Match               debug_log
+      host                <elasticsearch_url>
+      port                9200
+      logstash_format     on
+      replace_dots        on
+      retry_limit         false
+    [OUTPUT]
+      name                es
+      Match               error_log
+      host                <elasticsearch_url>
+      port                9200
+      logstash_format     on
+      replace_dots        on
+      retry_limit         false
+    [OUTPUT]
+      name                es
+      Match               info_log
+      host                <elasticsearch_url>
+      port                9200
+      logstash_format     on
+      replace_dots        on
+      retry_limit         false
